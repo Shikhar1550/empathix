@@ -1,0 +1,917 @@
+@import "tailwindcss";
+
+
+/* ============================================================
+   EMPATHIX Design System — Dark Futuristic Voice Assistant
+   ============================================================ */
+
+:root {
+  /* Core palette */
+  --bg-primary: #0A0A0F;
+  --bg-secondary: #0E0E15;
+  --bg-surface: #12121A;
+  --bg-elevated: #1A1A2E;
+  --bg-card: #14141F;
+
+  /* Text */
+  --text-primary: #E8E8ED;
+  --text-secondary: #8A8A9A;
+  --text-muted: #55556A;
+  --text-accent: #FFFFFF;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.10);
+
+  /* Emotion colors */
+  --emotion-sad: #4A90D9;
+  --emotion-happy: #F5C842;
+  --emotion-angry: #E8453C;
+  --emotion-fear: #9B59B6;
+  --emotion-neutral: #7F8C8D;
+  --emotion-surprise: #E67E22;
+
+  /* Orb */
+  --orb-idle: #1A1A2E;
+  --orb-size: 220px;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Transitions */
+  --transition-emotion: 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 0.2s ease;
+  --transition-medium: 0.4s ease;
+}
+
+/* ============================================================
+   Reset & Base
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  border: none;
+  text-align: left;
+}
+
+/* ============================================================
+   Ambient Background
+   ============================================================ */
+
+.empathix-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.empathix-bg::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 800px;
+  height: 800px;
+  transform: translate(-50%, -60%);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--ambient-color, rgba(127, 140, 141, 0.06)) 0%, transparent 70%);
+  transition: background var(--transition-emotion);
+  filter: blur(80px);
+}
+
+.empathix-bg::after {
+  content: '';
+  position: absolute;
+  bottom: -200px;
+  left: 50%;
+  width: 600px;
+  height: 400px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--ambient-color, rgba(127, 140, 141, 0.03)) 0%, transparent 70%);
+  transition: background var(--transition-emotion);
+  filter: blur(120px);
+}
+
+/* ============================================================
+   VoiceOrb Animations
+   ============================================================ */
+
+/* Pulse animation for listening state */
+@keyframes orbPulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+/* Ripple ring animation */
+@keyframes rippleExpand {
+  0% {
+    transform: translate(-50%, -50%) scale(0.85);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* Gradient rotation for processing */
+@keyframes gradientRotate {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Gentle bounce for speaking */
+@keyframes speakBounce {
+
+  0%,
+  100% {
+    transform: scale(1) translateY(0);
+  }
+
+  25% {
+    transform: scale(1.02) translateY(-3px);
+  }
+
+  50% {
+    transform: scale(0.98) translateY(1px);
+  }
+
+  75% {
+    transform: scale(1.01) translateY(-2px);
+  }
+}
+
+/* Idle breathing */
+@keyframes idleBreathe {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.02);
+    opacity: 0.92;
+  }
+}
+
+/* Inner glow pulse */
+@keyframes innerGlowPulse {
+
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.voice-orb-wrapper {
+  position: relative;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.voice-orb {
+  position: relative;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  background: var(--orb-idle);
+  transition:
+    box-shadow var(--transition-emotion),
+    background var(--transition-emotion),
+    transform 0.15s ease-out;
+  cursor: default;
+  z-index: 2;
+}
+
+/* Inner gradient layer */
+.voice-orb::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%,
+      rgba(255, 255, 255, 0.08) 0%,
+      transparent 60%);
+  z-index: 1;
+}
+
+/* Sheen highlight */
+.voice-orb::after {
+  content: '';
+  position: absolute;
+  top: 12%;
+  left: 20%;
+  width: 35%;
+  height: 20%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse,
+      rgba(255, 255, 255, 0.08) 0%,
+      transparent 100%);
+  z-index: 2;
+}
+
+/* Processing gradient overlay */
+.voice-orb-processing-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.voice-orb-processing-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--orb-glow-color, var(--emotion-neutral));
+  border-right-color: var(--orb-glow-color, var(--emotion-neutral));
+  animation: gradientRotate 2.5s linear infinite;
+  opacity: 0.7;
+}
+
+.voice-orb-processing-ring::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  border-bottom-color: var(--orb-glow-color, var(--emotion-neutral));
+  border-left-color: var(--orb-glow-color, var(--emotion-neutral));
+  animation: gradientRotate 3.5s linear infinite reverse;
+  opacity: 0.4;
+}
+
+.is-processing .voice-orb-processing-ring {
+  opacity: 1;
+}
+
+/* Listening state */
+.is-listening .voice-orb {
+  animation: orbPulse 2s ease-in-out infinite;
+}
+
+/* Speaking state */
+.is-speaking .voice-orb {
+  animation: speakBounce 1.2s ease-in-out infinite;
+}
+
+/* Idle state */
+.is-idle .voice-orb {
+  animation: idleBreathe 4s ease-in-out infinite;
+}
+
+/* Ripple rings */
+.voice-orb-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  border: 1.5px solid var(--orb-glow-color, var(--emotion-neutral));
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.is-listening .voice-orb-ripple {
+  animation: rippleExpand 2.5s ease-out infinite;
+}
+
+.voice-orb-ripple:nth-child(2) {
+  animation-delay: 0.5s;
+}
+
+.voice-orb-ripple:nth-child(3) {
+  animation-delay: 1.0s;
+}
+
+.voice-orb-ripple:nth-child(4) {
+  animation-delay: 1.5s;
+}
+
+/* ============================================================
+   EmotionBadge
+   ============================================================ */
+
+.emotion-badge-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 90px;
+}
+
+.emotion-name {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  transition: color var(--transition-emotion);
+}
+
+.emotion-confidence {
+  font-size: 42px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  transition: color var(--transition-emotion);
+  line-height: 1;
+}
+
+.emotion-icon-shape {
+  width: 28px;
+  height: 28px;
+  position: relative;
+  transition: all var(--transition-emotion);
+}
+
+/* CSS emotion shapes */
+.emotion-shape-sad {
+  width: 24px;
+  height: 12px;
+  border: 3px solid currentColor;
+  border-radius: 0 0 50% 50%;
+  border-top: none;
+  transform: translateY(2px);
+}
+
+.emotion-shape-happy {
+  width: 24px;
+  height: 12px;
+  border: 3px solid currentColor;
+  border-radius: 50% 50% 0 0;
+  border-bottom: none;
+  transform: translateY(4px);
+}
+
+.emotion-shape-angry {
+  width: 0;
+  height: 0;
+  border-left: 13px solid transparent;
+  border-right: 13px solid transparent;
+  border-bottom: 22px solid currentColor;
+}
+
+.emotion-shape-fear {
+  width: 22px;
+  height: 22px;
+  border: 3px solid currentColor;
+  border-radius: 50%;
+  position: relative;
+}
+
+.emotion-shape-fear::after {
+  content: '!';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.emotion-shape-neutral {
+  width: 24px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 2px;
+  transform: translateY(8px);
+}
+
+.emotion-shape-surprise {
+  width: 22px;
+  height: 22px;
+  border: 3px solid currentColor;
+  border-radius: 50%;
+}
+
+/* Emotion score bars */
+.emotion-scores {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 40px;
+  padding-top: 8px;
+}
+
+.emotion-score-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 32px;
+}
+
+.emotion-score-bar-fill {
+  width: 6px;
+  border-radius: 3px;
+  transition: height 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color var(--transition-emotion);
+  min-height: 2px;
+}
+
+.emotion-score-bar-label {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ============================================================
+   WaveformBar
+   ============================================================ */
+
+.waveform-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 64px;
+  padding: 0 8px;
+}
+
+.waveform-bar {
+  width: 3px;
+  border-radius: 2px;
+  transition: height 0.08s ease-out, background-color var(--transition-emotion);
+  min-height: 3px;
+}
+
+/* Breathing animation for inactive bars */
+@keyframes barBreathe {
+
+  0%,
+  100% {
+    height: 3px;
+  }
+
+  50% {
+    height: 8px;
+  }
+}
+
+.waveform-bar-idle {
+  animation: barBreathe 2.5s ease-in-out infinite;
+}
+
+/* Stagger the breathing */
+.waveform-bar-idle:nth-child(2n) {
+  animation-delay: 0.15s;
+}
+
+.waveform-bar-idle:nth-child(3n) {
+  animation-delay: 0.30s;
+}
+
+.waveform-bar-idle:nth-child(5n) {
+  animation-delay: 0.45s;
+}
+
+.waveform-bar-idle:nth-child(7n) {
+  animation-delay: 0.60s;
+}
+
+.waveform-bar-idle:nth-child(11n) {
+  animation-delay: 0.10s;
+}
+
+.waveform-bar-idle:nth-child(13n) {
+  animation-delay: 0.50s;
+}
+
+/* ============================================================
+   TranscriptLog
+   ============================================================ */
+
+.transcript-panel {
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.transcript-header {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.transcript-header h2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+.transcript-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+/* Scrollbar styling */
+.transcript-messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.transcript-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.transcript-messages::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 2px;
+}
+
+/* Message fade in */
+@keyframes messageFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.transcript-message {
+  animation: messageFadeIn 0.4s ease-out forwards;
+  max-width: 90%;
+}
+
+.transcript-msg-user {
+  align-self: flex-end;
+  text-align: right;
+}
+
+.transcript-msg-user .msg-bubble {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px 14px 4px 14px;
+  padding: 10px 14px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.transcript-msg-ai {
+  align-self: flex-start;
+  text-align: left;
+}
+
+.transcript-msg-ai .msg-bubble {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 14px 14px 14px 4px;
+  padding: 10px 14px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  border-left: 2px solid var(--msg-accent-color, var(--emotion-neutral));
+  transition: border-color var(--transition-emotion);
+}
+
+.msg-emotion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-top: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  transition: color var(--transition-emotion);
+}
+
+.msg-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ============================================================
+   Mic Button
+   ============================================================ */
+
+.mic-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  transition: all 0.25s ease;
+  position: relative;
+  z-index: 10;
+  outline: none;
+}
+
+.mic-btn:hover {
+  background: #252540;
+  transform: scale(1.05);
+}
+
+.mic-btn:active {
+  transform: scale(0.95);
+}
+
+.mic-btn-recording {
+  background: #E8453C !important;
+  box-shadow: 0 0 40px rgba(232, 69, 60, 0.35);
+}
+
+.mic-btn-recording:hover {
+  background: #d43e37 !important;
+}
+
+/* Mic ring animation when recording */
+@keyframes micRingPulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+
+  50% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+.mic-btn-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid #E8453C;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mic-btn-recording .mic-btn-ring {
+  animation: micRingPulse 1.5s ease-out infinite;
+}
+
+/* ============================================================
+   Action Chip
+   ============================================================ */
+
+@keyframes chipFadeInOut {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  15% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  85% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.25);
+  color: #66BB6A;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  animation: chipFadeInOut 3s ease-in-out forwards;
+}
+
+/* ============================================================
+   Status Dot
+   ============================================================ */
+
+@keyframes statusPulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: background-color var(--transition-fast);
+}
+
+.status-dot-ready {
+  background: #4CAF50;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+}
+
+.status-dot-processing {
+  background: #FFC107;
+  box-shadow: 0 0 8px rgba(255, 193, 7, 0.5);
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+.status-dot-error {
+  background: #F44336;
+  box-shadow: 0 0 8px rgba(244, 67, 54, 0.5);
+}
+
+/* ============================================================
+   Layout Helpers
+   ============================================================ */
+
+.empathix-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+.empathix-main {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 32px;
+  position: relative;
+}
+
+.empathix-sidebar {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  min-height: 0;
+}
+
+.empathix-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px;
+  z-index: 10;
+}
+
+.empathix-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+
+.empathix-subtitle {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 3px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.empathix-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.action-chip-area {
+  position: absolute;
+  bottom: 32px;
+  left: 32px;
+  z-index: 10;
+}
+
+/* State text below orb group */
+.state-text {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: color var(--transition-medium);
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 900px) {
+  .empathix-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .empathix-sidebar {
+    grid-column: 1;
+    grid-row: 2;
+    max-height: 300px;
+    border-left: none;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .empathix-main {
+    min-height: 70vh;
+  }
+}

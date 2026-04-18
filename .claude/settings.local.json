@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(C:/Users/shikh/empathix/venv/Scripts/python.exe emotion_detector.py)"
+    ]
+  }
+}

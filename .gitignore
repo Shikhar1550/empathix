@@ -1,0 +1,55 @@
+# ----------------------
+# Python
+# ----------------------
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ----------------------
+# Environment variables
+# ----------------------
+.env
+.env.*
+
+# ----------------------
+# Models / ML files (VERY IMPORTANT)
+# ----------------------
+pretrained_models/
+wav2vec2_checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# ----------------------
+# Audio files
+# ----------------------
+*.wav
+*.mp3
+
+# ----------------------
+# Frontend
+# ----------------------
+node_modules/
+dist/
+build/
+
+# ----------------------
+# OS / System files
+# ----------------------
+.DS_Store
+Thumbs.db
+
+# ----------------------
+# Logs
+# ----------------------
+*.log
+
+# ----------------------
+# IDE / Editor
+# ----------------------
+.vscode/
+.idea/
