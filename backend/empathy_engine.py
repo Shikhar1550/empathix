@@ -73,6 +73,37 @@ Maintain tranquility and gentle presence.
 Keep response under 35 words."""
 }
 
+# Hinglish (Hindi + English mix) prompts by emotion
+HINGLISH_EMOTION_PROMPTS = {
+    "sad": """Arre yaar, kya hua? Sab theek ho jaayega, main hoon na. Tension mat lo.""",
+    "happy": """Wah bhai wah! Bahut achha lag raha hai sunke! Mazaa aa gaya!""",
+    "angry": """Chill karo yaar, sab sort out ho jaayega. Gussa chhodo, relax karo.""",
+    "fearful": """Tension mat lo yaar, main hoon na tere saath. Sab theek ho jayega.""",
+    "neutral": """Haan bolo, main sun raha hoon. Kya chahiye batao?""",
+    "surprised": """Arre wah! Ye toh surprise hai! Maza aa gaya!""",
+    "disgusted": """Arre yaar, ignore karo. Chhodo usko, aage badhte hain.""",
+    "excited": """Wah wah! Kya baat hai! Bahut excited lag rahe ho!""",
+    "calm": """Theek hai yaar, shaanti se baat karte hain. Kya hua batao?""",
+}
+
+# Hinglish system prompt for Claude
+HINGLISH_SYSTEM_PROMPT = """LANGUAGE RULE: User is speaking in Hinglish (Hindi+English mix).
+You MUST respond in natural Hinglish — mix Hindi and English exactly like a young Indian friend would speak.
+
+Examples of correct Hinglish responses:
+- Sad: "Arre yaar, kya hua? Sab theek ho jaayega, main hoon na."
+- Happy: "Wah bhai wah! Bahut achha lag raha hai sunke!"
+- Angry: "Chill karo yaar, sab sort out ho jaayega."
+- Fear: "Tension mat lo, main hoon na tere saath."
+- Neutral: "Haan bolo, main sun raha hoon. Kya chahiye?"
+
+Rules for Hinglish:
+- Mix Hindi and English naturally (not 100% Hindi)
+- Use casual words: yaar, bhai, arre, na, toh, kya, bas
+- Keep sentences short, max 2 lines
+- Sound like a caring friend, not a robot
+- Actions like "Opening Spotify" stay in English"""
+
 # Fallback responses by emotion - tuned for Task 2
 FALLBACK_RESPONSES = {
     "sad": [
@@ -148,12 +179,25 @@ def _build_messages(
     return messages
 
 
-def _get_system_prompt(emotion: str, confidence: float) -> str:
-    """Get system prompt based on detected emotion."""
+def _get_system_prompt(emotion: str, confidence: float, language: str = "en") -> str:
+    """Get system prompt based on detected emotion and language."""
     # Normalize emotion key
     emotion_lower = emotion.lower() if emotion else "neutral"
+    lang_lower = (language or "en").lower()
 
-    # Get base prompt for emotion
+    # Check if Hinglish or Hindi
+    if lang_lower in ("hinglish", "hi"):
+        # Use Hinglish system prompt with emotion-specific example
+        hinglish_example = HINGLISH_EMOTION_PROMPTS.get(emotion_lower, HINGLISH_EMOTION_PROMPTS["neutral"])
+        base_prompt = HINGLISH_SYSTEM_PROMPT + f"\n\nFor this {emotion_lower} emotion, respond similar to: \"{hinglish_example}\""
+
+        # Add confidence context for low confidence detections
+        if confidence < 0.5:
+            base_prompt += "\nNote: The user's emotion is unclear, so remain adaptable."
+
+        return base_prompt
+
+    # Get base prompt for emotion (English)
     base_prompt = EMOTION_PROMPTS.get(emotion_lower, EMOTION_PROMPTS["neutral"])
 
     # Add confidence context for low confidence detections
@@ -197,7 +241,8 @@ async def get_empathetic_response(
     emotion: str,
     confidence: float,
     transcript: str,
-    conversation_history: List[Dict[str, Any]]
+    conversation_history: List[Dict[str, Any]],
+    language: str = "en"
 ) -> str:
     """
     Generate empathetic response using Claude API.
@@ -207,6 +252,7 @@ async def get_empathetic_response(
         confidence: Emotion detection confidence (0.0-1.0)
         transcript: User's speech transcript
         conversation_history: List of last 10 conversation turns
+        language: Detected language (en, hi, hinglish)
 
     Returns:
         Empathetic response string (max 35 words)
@@ -214,6 +260,13 @@ async def get_empathetic_response(
     cached_response = _get_cached_response(emotion, transcript)
     if cached_response:
         return cached_response
+
+    # If Hinglish/Hindi and no API key, use Hinglish fallback
+    lang_lower = (language or "en").lower()
+    if lang_lower in ("hinglish", "hi") and (not ANTHROPIC_AVAILABLE or not anthropic_client):
+        fallback = HINGLISH_EMOTION_PROMPTS.get(emotion.lower(), HINGLISH_EMOTION_PROMPTS["neutral"])
+        _store_cached_response(emotion, transcript, fallback)
+        return fallback
 
     # If no API key, use fallback immediately
     if not ANTHROPIC_AVAILABLE or not anthropic_client:
@@ -223,8 +276,8 @@ async def get_empathetic_response(
 
     try:
         started_at = time.perf_counter()
-        # Build system prompt for emotion
-        system_prompt = _get_system_prompt(emotion, confidence)
+        # Build system prompt for emotion and language
+        system_prompt = _get_system_prompt(emotion, confidence, language)
 
         # Build messages with history
         messages = _build_messages(transcript, conversation_history)
@@ -252,17 +305,17 @@ async def get_empathetic_response(
             response_text = " ".join(words[:35]) + "..."
 
         if not response_text:
-            response_text = _get_fallback(emotion)
+            response_text = _get_fallback(emotion) if lang_lower == "en" else HINGLISH_EMOTION_PROMPTS.get(emotion.lower(), HINGLISH_EMOTION_PROMPTS["neutral"])
 
         _store_cached_response(emotion, transcript, response_text)
         elapsed = time.perf_counter() - started_at
-        print(f"[EmpathyEngine] Claude stream completed in {elapsed:.2f}s")
+        print(f"[EmpathyEngine] Claude stream completed in {elapsed:.2f}s (lang={language})")
         return response_text
 
     except Exception as e:
         # Log error and return fallback
         print(f"[EmpathyEngine] Claude API error: {e}")
-        fallback = _get_fallback(emotion)
+        fallback = _get_fallback(emotion) if lang_lower == "en" else HINGLISH_EMOTION_PROMPTS.get(emotion.lower(), HINGLISH_EMOTION_PROMPTS["neutral"])
         _store_cached_response(emotion, transcript, fallback)
         return fallback
 

@@ -102,6 +102,9 @@ EMOTION_KEYWORDS = {
         "annoyed", "fed up", "sick of", "disgusted", "outraged",
         "livid", "fuming", "enraged", "screw", "stupid", "idiot",
         "terrible", "horrible", "awful", "worst",
+        # Hindi keywords for angry
+        "gussa", "krodh", "pagal", "bakwaas", "bekar",
+        "bura", "ganda", "chup", "band kar", "ghussa",
     ],
     "sad": [
         "sad", "sadness", "cry", "crying", "tears", "upset",
@@ -110,18 +113,30 @@ EMOTION_KEYWORDS = {
         "hopeless", "worthless", "useless", "failure", "low",
         "down", "gloomy", "devastated", "grief", "mourn",
         "tired of everything", "help me", "cant take", "giving up",
+        # Hindi keywords for sad
+        "dukh", "rona", "bura lag raha", "thak gaya",
+        "thak gayi", "akela", "akeli", "udaas", "kal nahi",
+        "kamjor", "tut gaya", "dard", "bechain",
     ],
     "happy": [
         "happy", "happiness", "joy", "excited", "amazing", "great",
         "wonderful", "fantastic", "awesome", "love", "loving",
         "blessed", "grateful", "thrilled", "delighted", "ecstatic",
         "cheerful", "good mood", "feeling good", "on top",
+        # Hindi keywords for happy
+        "khushi", "maza", "achha", "badiya", "mast",
+        "zabardast", "shandar", "waah", "kamaal", "sahi",
+        "badhiya", "anand", "harshit", "prasan", "kush",
     ],
     "fear": [
         "scared", "afraid", "fear", "fearful", "terrified", "terror",
         "anxious", "anxiety", "panic", "panicking", "worried",
         "nervous", "stress", "stressed", "overwhelmed", "helpless",
         "dread", "nightmare", "phobia", "shaking", "trembling",
+        # Hindi keywords for fear
+        "dar", "darr", "darta", "darti", "ghabrana",
+        "tension", "fikar", "chinta", "pareshaan", "bhay",
+        "gabhrahat", "khatra", "khatre", "sanata",
     ],
     "neutral": [
         "okay", "fine", "alright", "normal", "whatever",

@@ -23,6 +23,7 @@ warnings.filterwarnings("ignore", message=".*torch.*");
 # =============================================================================
 
 _whisper_model = None
+_current_model_size = None
 _model_loading = False
 _model_error = None
 
@@ -31,13 +32,85 @@ _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 # "tiny" is the best latency/accuracy tradeoff here because intent detection
 # matters more than perfect transcription for short assistant turns.
-DEFAULT_MODEL_SIZE = os.getenv("WHISPER_MODEL", "tiny")
-DEFAULT_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en").strip() or None
+# Changed to "base" for better multilingual support, especially Hindi
+DEFAULT_MODEL_SIZE = os.getenv("WHISPER_MODEL", "base")
+# Auto-detect language if not set (None = auto-detect)
+WHISPER_LANG = os.getenv("WHISPER_LANGUAGE", "").strip()
+DEFAULT_LANGUAGE = WHISPER_LANG if WHISPER_LANG else None
 COMMAND_PROMPT = (
     "Voice assistant commands: open Spotify, play playlist, play my playlist, "
     "open Spotify and play my playlist, play music, pause music, next track, "
-    "open Chrome, open Notepad, take screenshot."
+    "open Chrome, open Notepad, take screenshot. "
+    "Hindi commands: Spotify खोलो, playlist चलाओ, music बजाओ, pause करो, next track, "
+    "Chrome खोलो, Notepad खोलो, screenshot लो."
 )
+
+# Hindi keywords for Hinglish detection
+HINDI_WORDS = {
+    "yaar", "bhai", "arre", "arey", "na", "toh", "to", "kya", "kahan", "kaisa",
+    "kaisi", "acha", "achi", "achha", "achhi", "theek", "thik", "nahi", "nai",
+    "haan", "ha", "ji", "bas", "bus", "yeh", "woh", "wo", "mera", "meri", "tera",
+    "teri", "tum", "aap", "main", "mai", "mujhe", "mujhko", "tujhe", "tujhko",
+    "chahiye", "chahiye", "kar", "karo", "karke", "raha", "rahi", "rahe",
+    "gaya", "gayi", "gya", "gyi", "hoga", "hogi", "hai", "hain", "tha", "thi",
+    "raha", "rhi", "rkha", "rakha", "rkhi", "rakhi", "liya", "liye", "de",
+    "do", "diya", "diye", "le", "lo", "chal", "chalo", "dekho", "sun", "suno",
+    "bolo", "bat", "baat", "karo", "kr", "krna", "karna", "krne", "karne",
+    "karega", "karegi", "ja", "jao", "jaao", "aa", "aao", "aana", "jaana",
+    "khana", "khana", "peena", "pina", "so", "sona", "uth", "uthao", "baith",
+    "baitho", "ghar", "office", "school", "dost", "doston", "ladka", "ladki",
+    "bacha", "bache", "zindagi", "duniya", "waqt", "samay", "din", "raat",
+    "subah", "sham", "der", "jaldi", "abhi", "pehle", "bad", "baad", "mein",
+    "me", "se", "ko", "ke", "ki", "ka", "par", "pe", "mein", "tak", "aur",
+    "or", "lekin", "magar", "par", "kyunki", "kyoki", "jab", "tab", "agar",
+    "to", "nahi", "nai", "sirf", "bahut", "bohot", "jyada", "zada", "kam",
+    "thoda", "bahut", "sab", "sabhi", "kuch", "koi", "kisi", "har", "ek",
+    "do", "teen", "char", "paanch", "saat", "aath", "nau", "das",
+    "mujhse", "tujhse", "isse", "usse", "isse", "unse", "sabse", "sabse",
+}
+
+
+def _detect_hinglish(text: str, whisper_lang: str) -> str:
+    """
+    Detect if text is Hinglish (Hindi + English mix).
+
+    Args:
+        text: Transcribed text
+        whisper_lang: Language detected by Whisper (hi, en, etc.)
+
+    Returns:
+        Language code: "en", "hi", or "hinglish"
+    """
+    if not text:
+        return whisper_lang
+
+    text_lower = text.lower()
+    words = text_lower.split()
+
+    if not words:
+        return whisper_lang
+
+    # Count Hindi words
+    hindi_count = sum(1 for word in words if word.strip(".,!?;:'\"") in HINDI_WORDS)
+    total_words = len(words)
+
+    # If Whisper detected Hindi, check for English mix
+    if whisper_lang == "hi":
+        # Count English words (simple heuristic: not in Hindi dict)
+        english_count = total_words - hindi_count
+        # If significant English, it's Hinglish
+        if english_count >= 2 and english_count / total_words > 0.2:
+            return "hinglish"
+        return "hi"
+
+    # If Whisper detected English, check for Hindi mix
+    if whisper_lang == "en":
+        if hindi_count >= 1:  # Even one Hindi word indicates Hinglish
+            return "hinglish"
+        return "en"
+
+    # Default to whisper's detection
+    return whisper_lang
 
 
 def load_whisper_model(model_size: str = DEFAULT_MODEL_SIZE) -> bool:
@@ -50,9 +123,9 @@ def load_whisper_model(model_size: str = DEFAULT_MODEL_SIZE) -> bool:
     Returns:
         True if model loaded successfully, False otherwise
     """
-    global _whisper_model, _model_loading, _model_error
+    global _whisper_model, _current_model_size, _model_loading, _model_error
 
-    if _whisper_model is not None:
+    if _whisper_model is not None and _current_model_size == model_size:
         return True
 
     if _model_loading:
@@ -72,6 +145,7 @@ def load_whisper_model(model_size: str = DEFAULT_MODEL_SIZE) -> bool:
 
         print(f"[STT] Loading Whisper model '{model_size}'...")
         _whisper_model = whisper.load_model(model_size)
+        _current_model_size = model_size
         print(f"[STT] Whisper model '{model_size}' loaded successfully")
         return True
 
@@ -176,8 +250,8 @@ def _transcribe_sync(filepath: str) -> Dict[str, Any]:
             lang_confidence = float(probs[detected_lang])
 
         # Decode options - multilingual support
+        # Auto-detect language for Hinglish support
         decode_options = {
-            "language": detected_lang,
             "task": "transcribe",
             "fp16": False,  # Use FP32 for compatibility
             "temperature": 0.0,
@@ -188,6 +262,14 @@ def _transcribe_sync(filepath: str) -> Dict[str, Any]:
             "compression_ratio_threshold": 2.4,
         }
 
+        # Always auto-detect language (don't force it)
+        # This allows Whisper to detect Hindi better
+        _, probs = _whisper_model.detect_language(mel)
+        detected_lang = max(probs, key=probs.get)
+        lang_confidence = float(probs[detected_lang])
+
+        print(f"[STT] Detected language: {detected_lang} (confidence: {lang_confidence:.2f})")  # Debug logging
+
         # Run transcription
         result = _whisper_model.transcribe(
             str(filepath),
@@ -197,11 +279,16 @@ def _transcribe_sync(filepath: str) -> Dict[str, Any]:
         # Extract text
         text = result.get("text", "").strip()
 
+        # Detect Hinglish (Hindi + English mix)
+        final_lang = _detect_hinglish(text, detected_lang)
+
+        print(f"[STT] Final language: {final_lang}, Text: '{text}'")  # Debug logging
+
         # If no text detected, return empty with low confidence
         if not text:
             return {
                 "text": "",
-                "language": detected_lang,
+                "language": final_lang,
                 "confidence": 0.0,
                 "words": [],
                 "duration": duration
@@ -240,7 +327,7 @@ def _transcribe_sync(filepath: str) -> Dict[str, Any]:
 
         return {
             "text": text,
-            "language": detected_lang,
+            "language": final_lang,
             "confidence": round(avg_confidence, 3),
             "words": words,
             "duration": round(duration, 2)

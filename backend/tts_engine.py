@@ -117,6 +117,11 @@ def _clear_cache() -> None:
     _cache_keys.clear()
 
 
+# Clear cache on module load to ensure fresh voice after config changes
+_clear_cache()
+print("[TTS] Cache cleared on startup")
+
+
 def _speak_pyttsx3(text: str, emotion: str = "neutral") -> bytes:
     """
     Fallback TTS using pyttsx3.
@@ -298,6 +303,7 @@ async def speak(text: str, emotion: str = "neutral") -> bytes:
     # Try ElevenLabs if API key exists
     if api_key and api_key.strip() and api_key != "your_key_here" and voice_id and voice_id != "your_voice_id":
         try:
+            print(f"[TTS] Using ElevenLabs voice: {voice_id[:8]}... with emotion: {emotion}")
             audio_data = await _speak_elevenlabs(text, emotion, api_key, voice_id)
             # Cache the result
             _add_to_cache(text, emotion, audio_data)
@@ -310,6 +316,7 @@ async def speak(text: str, emotion: str = "neutral") -> bytes:
     if not PYTTSX3_AVAILABLE:
         raise RuntimeError("Neither ElevenLabs nor pyttsx3 available. Install pyttsx3 or set ELEVENLABS_API_KEY")
 
+    print(f"[TTS] Using fallback pyttsx3 (ElevenLabs not configured or failed)")
     audio_data = await asyncio.to_thread(_speak_pyttsx3, text, emotion)
     # Note: We don't cache pyttsx3 results as they're fast enough to generate
     return audio_data

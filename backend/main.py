@@ -35,6 +35,22 @@ import intent_parser
 import action_executor
 import tts_engine
 
+# Try to import Deepgram for fast STT
+try:
+    import deepgram_stt
+    USE_DEEPGRAM = deepgram_stt.is_available()
+    if USE_DEEPGRAM:
+        print("[Main] Using Deepgram for fast STT (0.8s response)")
+except Exception:
+    USE_DEEPGRAM = False
+
+# STT function selector
+async def transcribe_audio(filepath: str) -> Dict[str, Any]:
+    """Transcribe using Deepgram if available, else Whisper."""
+    if USE_DEEPGRAM:
+        return await deepgram_stt.transcribe(filepath)
+    return await stt_engine.transcribe(filepath)
+
 # Global state
 active_websockets: Set[WebSocket] = set()
 conversation_history: List[Dict[str, Any]] = []
@@ -190,7 +206,7 @@ def command_ack(action_intent: Dict[str, Any]) -> str:
     return "On it."
 
 
-async def process_transcript(transcript: str, emotion: str = "neutral", confidence: float = 0.0) -> Dict[str, Any]:
+async def process_transcript(transcript: str, emotion: str = "neutral", confidence: float = 0.0, language: str = "en") -> Dict[str, Any]:
     """Handle a text transcript through intent detection and empathy generation."""
     cleaned_transcript = (transcript or "").strip()
     if not cleaned_transcript:
@@ -226,7 +242,7 @@ async def process_transcript(transcript: str, emotion: str = "neutral", confiden
             "emotion": emotion,
             "confidence": float(confidence),
             "transcript": cleaned_transcript,
-            "language": "text",
+            "language": language,
             "response": action_message,
             "action_taken": action_taken,
             "action_message": action_message,
@@ -238,7 +254,7 @@ async def process_transcript(transcript: str, emotion: str = "neutral", confiden
     add_to_history("user", cleaned_transcript, emotion)
     history = get_history_for_empathy()
     empathetic_response = await empathy_engine.get_empathetic_response(
-        emotion, float(confidence), cleaned_transcript, history
+        emotion, float(confidence), cleaned_transcript, history, language
     )
     add_to_history("assistant", empathetic_response)
 
@@ -246,7 +262,7 @@ async def process_transcript(transcript: str, emotion: str = "neutral", confiden
         "emotion": emotion,
         "confidence": float(confidence),
         "transcript": cleaned_transcript,
-        "language": "text",
+        "language": language,
         "response": empathetic_response,
         "action_taken": action_taken,
         "action_message": action_message,
@@ -340,7 +356,7 @@ async def analyze_audio(audio: UploadFile = File(...)):
 
         # Step 3: Run STT first, then pass transcript into text-first emotion detection.
         parallel_started = time.perf_counter()
-        transcript_result = await stt_engine.transcribe(normalized_path)
+        transcript_result = await transcribe_audio(normalized_path)
         transcript = transcript_result.get("text", "")
         emotion_result = await asyncio.to_thread(
             emotion_detector.detect_emotion,
@@ -363,7 +379,7 @@ async def analyze_audio(audio: UploadFile = File(...)):
         action_message = None
 
         if has_intent and intent_type != "conversation":
-            response_data = await process_transcript(transcript, "neutral", 0.0)
+            response_data = await process_transcript(transcript, "neutral", 0.0, language)
             response_data["language"] = language
             response_data["audio_duration"] = duration
 
@@ -385,7 +401,7 @@ async def analyze_audio(audio: UploadFile = File(...)):
         history = get_history_for_empathy()
         claude_started = time.perf_counter()
         empathetic_response = await empathy_engine.get_empathetic_response(
-            emotion, confidence, transcript, history
+            emotion, confidence, transcript, history, language
         )
         t3 = time.perf_counter() - claude_started
 
@@ -454,9 +470,10 @@ async def chat_text(request: dict):
     transcript = request.get("text", "")
     emotion = request.get("emotion", "neutral") or "neutral"
     confidence = float(request.get("confidence", 0.0) or 0.0)
+    language = request.get("language", "en") or "en"
 
     await broadcast_status("processing")
-    response_data = await process_transcript(transcript, emotion, confidence)
+    response_data = await process_transcript(transcript, emotion, confidence, language)
     await broadcast_status("speaking", {"response": response_data["response"][:50]})
     await broadcast_status("idle")
     return response_data

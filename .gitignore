@@ -53,3 +53,5 @@ Thumbs.db
 # ----------------------
 .vscode/
 .idea/
+backend/_pydeps/
+tmp-video-frames/
