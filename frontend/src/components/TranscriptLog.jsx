@@ -1,134 +1,83 @@
 import { useEffect, useRef } from 'react';
 
-/**
- * TranscriptLog — Scrollable conversation log with user/EMPATHIX messages.
- *
- * Props:
- *   messages  — [{ role: 'user'|'assistant', text, emotion?, confidence? }]
- *   emotionColor — current accent color
- */
-
 const EMOTION_COLORS = {
-  sad:       '#4A90D9',
-  happy:     '#F5C842',
-  angry:     '#E8453C',
-  fear:      '#9B59B6',
-  fearful:   '#9B59B6',
-  neutral:   '#7F8C8D',
-  surprise:  '#E67E22',
-  surprised: '#E67E22',
-  calm:      '#22D3EE',
-  excited:   '#F472B6',
-  disgusted: '#4ADE80',
+  sad: '#5cc8ff',
+  happy: '#ffd23a',
+  angry: '#ff3aa1',
+  fear: '#a050ff',
+  fearful: '#a050ff',
+  neutral: '#7a3cff',
+  surprise: '#ff8a3a',
+  surprised: '#ff8a3a',
+  calm: '#5cf2ff',
+  excited: '#ff8fd1',
+  disgusted: '#3affc8',
 };
 
 export default function TranscriptLog({ messages = [] }) {
   const scrollRef = useRef(null);
 
-  // Auto-scroll to bottom on new message
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el) {
-      requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-      });
-    }
+    const element = scrollRef.current;
+    if (!element) return;
+    requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
   }, [messages.length]);
 
   return (
     <div className="transcript-panel">
       <div className="transcript-header">
-        <h2>Conversation</h2>
+        <div>
+          <div className="transcript-kicker">NEURAL TRANSCRIPT</div>
+          <h2>Conversation</h2>
+        </div>
       </div>
 
       <div className="transcript-messages" ref={scrollRef}>
         {messages.length === 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1,
-              gap: 12,
-              opacity: 0.3,
-              padding: '40px 20px',
-              textAlign: 'center',
-            }}
-          >
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            <span style={{ fontSize: 12, letterSpacing: 1 }}>
-              Start speaking to begin
-            </span>
+          <div className="transcript-empty">
+            <div className="transcript-empty-icon" />
+            <span>AWAITING INPUT</span>
           </div>
         ) : (
-          messages.map((msg, idx) => {
+          messages.map((msg, index) => {
             const isUser = msg.role === 'user';
-            const emotionColor =
-              EMOTION_COLORS[msg.emotion] || EMOTION_COLORS.neutral;
+            const emotionColor = EMOTION_COLORS[msg.emotion] || EMOTION_COLORS.neutral;
 
             return (
-              <div
-                key={idx}
-                className={`transcript-message ${
-                  isUser ? 'transcript-msg-user' : 'transcript-msg-ai'
-                }`}
-                style={{
-                  animationDelay: `${Math.min(idx * 0.05, 0.3)}s`,
-                }}
+              <article
+                key={`${msg.role}-${index}-${msg.timestamp || index}`}
+                className={`transcript-message ${isUser ? 'is-user' : 'is-assistant'}`}
+                style={{ '--msg-accent': emotionColor }}
               >
-                <div className="msg-label">
-                  {isUser ? 'You' : 'EMPATHIX'}
+                <div className="transcript-message-who">{isUser ? 'YOU' : 'EMPATHIX'}</div>
+                <div className="transcript-message-text">{msg.text}</div>
+                <div className="transcript-message-footer">
+                  {isUser ? (
+                    <span className="transcript-message-chip">
+                      {msg.emotion || 'neutral'}
+                      {msg.confidence != null ? ` ${Math.round(msg.confidence * 100)}%` : ''}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <span>{formatTime(msg.timestamp)}</span>
                 </div>
-                <div
-                  className="msg-bubble"
-                  style={
-                    !isUser
-                      ? { '--msg-accent-color': emotionColor }
-                      : undefined
-                  }
-                >
-                  {msg.text}
-                </div>
-                {/* Emotion chip for user messages */}
-                {isUser && msg.emotion && (
-                  <div
-                    className="msg-emotion-chip"
-                    style={{ color: emotionColor }}
-                  >
-                    <span
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        background: emotionColor,
-                        display: 'inline-block',
-                      }}
-                    />
-                    {msg.emotion}
-                    {msg.confidence != null && (
-                      <span style={{ opacity: 0.6 }}>
-                        {Math.round(msg.confidence * 100)}%
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
+              </article>
             );
           })
         )}
       </div>
     </div>
   );
+}
+
+function formatTime(timestamp) {
+  const date = timestamp ? new Date(timestamp) : new Date();
+  return date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 }

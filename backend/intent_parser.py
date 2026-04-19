@@ -4,6 +4,7 @@ Detects user commands from transcript text using fuzzy matching
 """
 
 import re
+from difflib import SequenceMatcher
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -76,6 +77,30 @@ MEDIA_COMMANDS = {
     "unmute": ["unmute", "turn on sound", "sound on"],
 }
 
+# Spotify playlist phrases. These are checked before generic "open app" so
+# compound commands like "open Spotify and play my playlist" become one action.
+SPOTIFY_PLAYLIST_PATTERNS = [
+    r'(?:open\s+spotify\s+(?:and\s+)?)?play\s+(?:my\s+)?playlist(?:\s+called\s+(.+)|\s+named\s+(.+)|\s+(.+))?$',
+    r'(?:open\s+spotify\s+(?:and\s+)?)?play\s+(.+?)\s+playlist$',
+    r'play\s+my\s+spotify\s+playlist$',
+]
+
+BROKEN_PLAYLIST_HINTS = [
+    "lay lay lay",
+    "play play play",
+    "play list",
+    "playlist",
+    "playlists",
+    "lallers",
+    "layers",
+    "players",
+    "left lallers",
+    "gabe left lallers",
+    "pleylist",
+    "plalist",
+    "palelist",
+]
+
 # System commands
 SYSTEM_COMMANDS = {
     "screenshot": ["take screenshot", "capture screen", "screenshot", "screen capture", "print screen"],
@@ -129,18 +154,55 @@ def extract_search_query(transcript: str) -> Optional[str]:
     return None
 
 
+def _looks_like_broken_playlist_command(transcript: str) -> bool:
+    """Recover common Whisper mistakes for very short playlist commands."""
+    text = re.sub(r'[^a-z0-9\s]', ' ', transcript.lower())
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    if not text:
+        return False
+
+    if any(hint in text for hint in BROKEN_PLAYLIST_HINTS):
+        return True
+
+    words = text.split()
+    lay_like_count = sum(1 for word in words if word in {"lay", "le", "play", "pley"})
+    if lay_like_count >= 2 and len(words) <= 5:
+        return True
+
+    best_playlist_score = max(
+        SequenceMatcher(None, word, "playlist").ratio()
+        for word in words
+    )
+    has_playish_word = any(
+        SequenceMatcher(None, word, "play").ratio() >= 0.70
+        for word in words
+    )
+
+    return has_playish_word and best_playlist_score >= 0.55
+
+
 def _fuzzy_match(text: str, choices: list, threshold: int = 70) -> tuple:
     """
     Find best fuzzy match using rapidfuzz.
     Returns (match, score) or (None, 0) if no good match.
     """
     if not RAPIDFUZZ_AVAILABLE:
-        # Fallback to simple containment check
+        # Fallback to containment + difflib similarity when rapidfuzz is unavailable.
         text_lower = text.lower()
+        best_choice = None
+        best_score = 0
         for choice in choices:
-            if choice.lower() in text_lower:
+            choice_lower = choice.lower()
+            if choice_lower in text_lower:
                 return (choice, 100)
-        return (None, 0)
+            score = int(SequenceMatcher(None, text_lower, choice_lower).ratio() * 100)
+            if score > best_score:
+                best_choice = choice
+                best_score = score
+        if best_choice and best_score >= threshold:
+            return (best_choice, best_score)
+        return (None, best_score)
 
     result = process.extractOne(text, choices, scorer=fuzz.partial_ratio)
     if result and result[1] >= threshold:
@@ -180,6 +242,30 @@ def _detect_open_app(transcript: str) -> Optional[IntentResult]:
                         requires_confirmation=False
                     )
 
+    if open_phrase:
+        app_text = transcript_lower.replace(open_phrase, "", 1).strip()
+        app_text = re.sub(r'^(the|a|an)\s+', '', app_text)
+        choices = []
+        synonym_to_app = {}
+
+        for canonical_app, synonyms in APP_SYNONYMS.items():
+            for synonym in synonyms:
+                choices.append(synonym)
+                synonym_to_app[synonym] = canonical_app
+
+        app_match, app_score = _fuzzy_match(app_text, choices, threshold=75)
+        if app_match:
+            canonical_app = synonym_to_app[app_match]
+            return IntentResult(
+                has_intent=True,
+                intent_type="open_app",
+                app_name=canonical_app,
+                action="open",
+                query=None,
+                raw_match=transcript.strip(),
+                requires_confirmation=False
+            )
+
     return None
 
 
@@ -197,6 +283,51 @@ def _detect_search(transcript: str) -> Optional[IntentResult]:
             raw_match=transcript.strip(),
             requires_confirmation=False
         )
+
+    return None
+
+
+def _detect_spotify_playlist(transcript: str) -> Optional[IntentResult]:
+    """Detect Spotify playlist playback intent."""
+    transcript_lower = transcript.lower().strip()
+
+    if "playlist" not in transcript_lower and not _looks_like_broken_playlist_command(transcript_lower):
+        return None
+
+    if _looks_like_broken_playlist_command(transcript_lower):
+        return IntentResult(
+            has_intent=True,
+            intent_type="spotify_playlist",
+            app_name="spotify",
+            action="play_playlist",
+            query=None,
+            raw_match=transcript.strip(),
+            requires_confirmation=False
+        )
+
+    for pattern in SPOTIFY_PLAYLIST_PATTERNS:
+        match = re.search(pattern, transcript_lower)
+        if match:
+            query = None
+            for group in match.groups():
+                if group:
+                    query = group.strip()
+                    break
+
+            if query:
+                query = re.sub(r'^(my|the|a)\s+', '', query).strip()
+                if query in {"playlist", "spotify"}:
+                    query = None
+
+            return IntentResult(
+                has_intent=True,
+                intent_type="spotify_playlist",
+                app_name="spotify",
+                action="play_playlist",
+                query=query,
+                raw_match=transcript.strip(),
+                requires_confirmation=False
+            )
 
     return None
 
@@ -306,6 +437,7 @@ async def check_intent(transcript: str) -> Dict[str, Any]:
 
     # Check intents in order of specificity
     detectors = [
+        _detect_spotify_playlist,
         _detect_open_app,
         _detect_media,
         _detect_search,

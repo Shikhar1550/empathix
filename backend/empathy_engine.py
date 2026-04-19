@@ -6,12 +6,15 @@ Generates emotionally-aware responses using Claude API
 import os
 import asyncio
 import random
+import time
+from collections import OrderedDict
 from typing import List, Dict, Any
 
 from anthropic import AsyncAnthropic
 
 # Initialize Anthropic client - ensure we use the official API, not Ollama
 api_key = os.getenv("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = os.getenv("DEFAULT_CLAUDE_MODEL", "claude-sonnet-4-20250514")
 # Check if API key is valid (not empty, not placeholder)
 ANTHROPIC_AVAILABLE = api_key and api_key.strip() and api_key != "your_key_here" and len(api_key) > 20
 
@@ -120,6 +123,9 @@ FALLBACK_RESPONSES = {
     ]
 }
 
+MAX_RESPONSE_CACHE_SIZE = 20
+_response_cache: "OrderedDict[str, str]" = OrderedDict()
+
 
 def _build_messages(
     transcript: str,
@@ -164,6 +170,29 @@ def _get_fallback(emotion: str) -> str:
     return random.choice(options)
 
 
+def _cache_key(emotion: str, transcript: str) -> str:
+    normalized_emotion = (emotion or "neutral").strip().lower()
+    normalized_transcript = " ".join((transcript or "").strip().lower().split())
+    return f"{normalized_emotion}_{normalized_transcript[:20]}"
+
+
+def _get_cached_response(emotion: str, transcript: str) -> str | None:
+    key = _cache_key(emotion, transcript)
+    cached = _response_cache.get(key)
+    if cached is not None:
+        _response_cache.move_to_end(key)
+    return cached
+
+
+def _store_cached_response(emotion: str, transcript: str, response: str) -> None:
+    key = _cache_key(emotion, transcript)
+    if key in _response_cache:
+        _response_cache.move_to_end(key)
+    _response_cache[key] = response
+    while len(_response_cache) > MAX_RESPONSE_CACHE_SIZE:
+        _response_cache.popitem(last=False)
+
+
 async def get_empathetic_response(
     emotion: str,
     confidence: float,
@@ -182,11 +211,18 @@ async def get_empathetic_response(
     Returns:
         Empathetic response string (max 35 words)
     """
+    cached_response = _get_cached_response(emotion, transcript)
+    if cached_response:
+        return cached_response
+
     # If no API key, use fallback immediately
     if not ANTHROPIC_AVAILABLE or not anthropic_client:
-        return _get_fallback(emotion)
+        fallback = _get_fallback(emotion)
+        _store_cached_response(emotion, transcript, fallback)
+        return fallback
 
     try:
+        started_at = time.perf_counter()
         # Build system prompt for emotion
         system_prompt = _get_system_prompt(emotion, confidence)
 
@@ -197,28 +233,38 @@ async def get_empathetic_response(
         if not messages:
             messages = [{"role": "user", "content": transcript or "Hello"}]
 
-        # Call Claude API
-        response = await anthropic_client.messages.create(
-            model="claude-3-sonnet-20240229",
-            max_tokens=150,
+        # Call Claude API with streaming for lower perceived latency.
+        full_text = ""
+        async with anthropic_client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=80,
             system=system_prompt,
-            messages=messages
-        )
+            messages=messages,
+        ) as stream:
+            async for text in stream.text_stream:
+                full_text += text
 
-        # Extract response text
-        response_text = response.content[0].text.strip() if response.content else ""
+        response_text = full_text.strip()
 
         # Truncate to ~35 words if needed
         words = response_text.split()
         if len(words) > 35:
             response_text = " ".join(words[:35]) + "..."
 
+        if not response_text:
+            response_text = _get_fallback(emotion)
+
+        _store_cached_response(emotion, transcript, response_text)
+        elapsed = time.perf_counter() - started_at
+        print(f"[EmpathyEngine] Claude stream completed in {elapsed:.2f}s")
         return response_text
 
     except Exception as e:
         # Log error and return fallback
         print(f"[EmpathyEngine] Claude API error: {e}")
-        return _get_fallback(emotion)
+        fallback = _get_fallback(emotion)
+        _store_cached_response(emotion, transcript, fallback)
+        return fallback
 
 
 # =============================================================================

@@ -29,8 +29,15 @@ _model_error = None
 # Thread pool executor for running Whisper in background
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-# Default model size - "base" is good balance of speed and accuracy
-DEFAULT_MODEL_SIZE = "base"
+# "tiny" is the best latency/accuracy tradeoff here because intent detection
+# matters more than perfect transcription for short assistant turns.
+DEFAULT_MODEL_SIZE = os.getenv("WHISPER_MODEL", "tiny")
+DEFAULT_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en").strip() or None
+COMMAND_PROMPT = (
+    "Voice assistant commands: open Spotify, play playlist, play my playlist, "
+    "open Spotify and play my playlist, play music, pause music, next track, "
+    "open Chrome, open Notepad, take screenshot."
+)
 
 
 def load_whisper_model(model_size: str = DEFAULT_MODEL_SIZE) -> bool:
@@ -158,16 +165,27 @@ def _transcribe_sync(filepath: str) -> Dict[str, Any]:
         # Make log-Mel spectrogram
         mel = whisper.log_mel_spectrogram(audio).to(_whisper_model.device)
 
-        # Detect language
-        _, probs = _whisper_model.detect_language(mel)
-        detected_lang = max(probs, key=probs.get)
-        lang_confidence = float(probs[detected_lang])
+        # Detect language only when not forced. Short commands are often
+        # misdetected, so English is the default for reliable Jarvis commands.
+        if DEFAULT_LANGUAGE:
+            detected_lang = DEFAULT_LANGUAGE
+            lang_confidence = 1.0
+        else:
+            _, probs = _whisper_model.detect_language(mel)
+            detected_lang = max(probs, key=probs.get)
+            lang_confidence = float(probs[detected_lang])
 
         # Decode options - multilingual support
         decode_options = {
             "language": detected_lang,
             "task": "transcribe",
             "fp16": False,  # Use FP32 for compatibility
+            "temperature": 0.0,
+            "condition_on_previous_text": False,
+            "initial_prompt": COMMAND_PROMPT,
+            "no_speech_threshold": 0.35,
+            "logprob_threshold": -1.0,
+            "compression_ratio_threshold": 2.4,
         }
 
         # Run transcription

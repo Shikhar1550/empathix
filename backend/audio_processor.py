@@ -75,8 +75,8 @@ def save_audio_file(audio_bytes: bytes) -> str:
         ValueError: If audio format is unsupported or invalid
         RuntimeError: If conversion fails
     """
-    if not audio_bytes or len(audio_bytes) == 0:
-        raise ValueError("Empty audio bytes provided")
+    if not audio_bytes or len(audio_bytes) < 1200:
+        raise ValueError("Audio was too short or incomplete. Please try speaking again.")
 
     # Create temp file with detected extension
     detected_ext = _detect_format_from_bytes(audio_bytes)
@@ -149,7 +149,7 @@ def _detect_format_from_bytes(audio_bytes: bytes) -> str:
     if header[4:8] == b'ftyp':
         return 'm4a'
 
-    return 'webm'  # Default for browser blobs
+    return 'unknown'
 
 
 def _convert_to_wav(input_path: Path, output_path: Path, input_format: str) -> None:
@@ -170,8 +170,9 @@ def _convert_to_wav(input_path: Path, output_path: Path, input_format: str) -> N
 
     # Method 1: ffmpeg (most reliable for webm/ogg)
     if FFMPEG_PATH and os.path.exists(FFMPEG_PATH):
-        try:
-            # Build ffmpeg command with WebM-specific flags
+        ffmpeg_attempts = [True, False] if input_format == "webm" else [False]
+
+        for use_format_hint in ffmpeg_attempts:
             cmd = [
                 FFMPEG_PATH,
                 "-y",
@@ -179,8 +180,9 @@ def _convert_to_wav(input_path: Path, output_path: Path, input_format: str) -> N
                 "-err_detect", "ignore_err",   # Ignore decode errors
             ]
 
-            # For WebM, add input format hint
-            if input_format == "webm":
+            # For WebM, try a format hint first, then retry without it. Some
+            # browser blobs have odd headers after rapid stop/start cycles.
+            if input_format == "webm" and use_format_hint:
                 cmd.extend(["-f", "webm"])
 
             cmd.extend([
@@ -192,23 +194,27 @@ def _convert_to_wav(input_path: Path, output_path: Path, input_format: str) -> N
                 str(output_path)
             ])
 
-            result = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                timeout=30
-            )
-            return
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode('utf-8', errors='ignore')[:150] if e.stderr else "unknown error"
-            errors.append(f"ffmpeg: {stderr}")
-        except Exception as e:
-            errors.append(f"ffmpeg: {str(e)}")
+            try:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    timeout=30
+                )
+                return
+            except subprocess.CalledProcessError as e:
+                stderr = e.stderr.decode('utf-8', errors='ignore')[:150] if e.stderr else "unknown error"
+                label = "ffmpeg-webm" if use_format_hint else "ffmpeg"
+                errors.append(f"{label}: {stderr}")
+            except Exception as e:
+                label = "ffmpeg-webm" if use_format_hint else "ffmpeg"
+                errors.append(f"{label}: {str(e)}")
 
     # Method 2: pydub (good for various formats)
     if PYDUB_AVAILABLE:
         try:
-            audio = AudioSegment.from_file(input_path, format=input_format)
+            pydub_format = None if input_format == "unknown" else input_format
+            audio = AudioSegment.from_file(input_path, format=pydub_format)
             audio = audio.set_channels(1).set_frame_rate(CONFIG.target_sample_rate)
             audio.export(output_path, format="wav")
             return

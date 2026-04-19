@@ -8,6 +8,7 @@ import os
 import io
 import asyncio
 import tempfile
+import wave
 from typing import Optional, Dict, Any, Tuple
 from pathlib import Path
 from functools import lru_cache
@@ -32,30 +33,30 @@ except ImportError:
 
 # ElevenLabs emotion settings: stability, similarity_boost, style
 ELEVENLABS_SETTINGS = {
-    "sad": {"stability": 0.80, "similarity_boost": 0.70, "style": 0.20},
-    "happy": {"stability": 0.35, "similarity_boost": 0.90, "style": 0.80},
-    "angry": {"stability": 0.90, "similarity_boost": 0.60, "style": 0.10},
-    "fearful": {"stability": 0.75, "similarity_boost": 0.65, "style": 0.15},
-    "fear": {"stability": 0.75, "similarity_boost": 0.65, "style": 0.15},
-    "neutral": {"stability": 0.60, "similarity_boost": 0.75, "style": 0.40},
-    "surprised": {"stability": 0.30, "similarity_boost": 0.85, "style": 0.90},
-    "excited": {"stability": 0.35, "similarity_boost": 0.90, "style": 0.80},
-    "calm": {"stability": 0.80, "similarity_boost": 0.70, "style": 0.20},
-    "disgusted": {"stability": 0.70, "similarity_boost": 0.70, "style": 0.30},
+    "sad": {"stability": 0.88, "similarity_boost": 0.78, "style": 0.10},
+    "happy": {"stability": 0.62, "similarity_boost": 0.86, "style": 0.45},
+    "angry": {"stability": 0.92, "similarity_boost": 0.78, "style": 0.12},
+    "fearful": {"stability": 0.86, "similarity_boost": 0.76, "style": 0.10},
+    "fear": {"stability": 0.86, "similarity_boost": 0.76, "style": 0.10},
+    "neutral": {"stability": 0.82, "similarity_boost": 0.82, "style": 0.22},
+    "surprised": {"stability": 0.68, "similarity_boost": 0.84, "style": 0.40},
+    "excited": {"stability": 0.62, "similarity_boost": 0.86, "style": 0.45},
+    "calm": {"stability": 0.90, "similarity_boost": 0.80, "style": 0.12},
+    "disgusted": {"stability": 0.82, "similarity_boost": 0.78, "style": 0.18},
 }
 
 # pyttsx3 rate by emotion (wpm)
 PYTTSX3_RATES = {
-    "sad": 130,
-    "happy": 185,
-    "angry": 145,  # Slower = calmer
-    "fearful": 140,
-    "fear": 140,
-    "neutral": 160,
-    "surprised": 175,
-    "excited": 185,
-    "calm": 140,
-    "disgusted": 150,
+    "sad": 118,
+    "happy": 142,
+    "angry": 124,
+    "fearful": 120,
+    "fear": 120,
+    "neutral": 132,
+    "surprised": 138,
+    "excited": 144,
+    "calm": 116,
+    "disgusted": 126,
 }
 
 # Simple in-memory cache for TTS results
@@ -128,7 +129,8 @@ def _speak_pyttsx3(text: str, emotion: str = "neutral") -> bytes:
 
     engine = pyttsx3.init()
     engine.setProperty('rate', rate)
-    engine.setProperty('volume', 0.9)
+    engine.setProperty('volume', 1.0)
+    _select_heavy_voice(engine)
 
     # Create temp file
     temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -139,8 +141,7 @@ def _speak_pyttsx3(text: str, emotion: str = "neutral") -> bytes:
         engine.save_to_file(text, temp_path)
         engine.runAndWait()
 
-        with open(temp_path, 'rb') as f:
-            audio_data = f.read()
+        audio_data = _deepen_wav_file(temp_path)
 
         return audio_data
     finally:
@@ -148,6 +149,74 @@ def _speak_pyttsx3(text: str, emotion: str = "neutral") -> bytes:
             Path(temp_path).unlink()
         except:
             pass
+
+
+def _select_heavy_voice(engine) -> None:
+    """Prefer a deeper male SAPI voice when Windows exposes one."""
+    preferred_terms = ("david", "mark", "male", "zira")
+
+    try:
+        voices = engine.getProperty("voices") or []
+        selected_voice_id = None
+
+        for term in preferred_terms:
+            for voice in voices:
+                name = f"{getattr(voice, 'name', '')} {getattr(voice, 'id', '')}".lower()
+                if term in name:
+                    selected_voice_id = voice.id
+                    break
+            if selected_voice_id:
+                break
+
+        if selected_voice_id:
+            engine.setProperty("voice", selected_voice_id)
+    except Exception:
+        pass
+
+
+def _deepen_wav_file(path: str) -> bytes:
+    """Pitch-shift pyttsx3 WAV output down for a heavier Jarvis-like timbre."""
+    pitch_steps = float(os.getenv("JARVIS_PITCH_STEPS", "-3.0"))
+
+    if pitch_steps == 0:
+        with open(path, "rb") as f:
+            return f.read()
+
+    try:
+        import librosa
+        import soundfile as sf
+
+        audio, sample_rate = sf.read(path, dtype="float32")
+        shifted = librosa.effects.pitch_shift(audio, sr=sample_rate, n_steps=pitch_steps)
+
+        out = io.BytesIO()
+        sf.write(out, shifted, sample_rate, format="WAV", subtype="PCM_16")
+        return out.getvalue()
+    except Exception:
+        try:
+            return _slow_wav_header(path, pitch_steps)
+        except Exception:
+            with open(path, "rb") as f:
+                return f.read()
+
+
+def _slow_wav_header(path: str, pitch_steps: float) -> bytes:
+    """Fallback deepen effect by lowering WAV playback rate metadata."""
+    with wave.open(path, "rb") as reader:
+        params = reader.getparams()
+        frames = reader.readframes(reader.getnframes())
+
+    rate_factor = 2 ** (pitch_steps / 12)
+    new_rate = max(8000, int(params.framerate * rate_factor))
+
+    out = io.BytesIO()
+    with wave.open(out, "wb") as writer:
+        writer.setnchannels(params.nchannels)
+        writer.setsampwidth(params.sampwidth)
+        writer.setframerate(new_rate)
+        writer.writeframes(frames)
+
+    return out.getvalue()
 
 
 async def _speak_elevenlabs(text: str, emotion: str, api_key: str, voice_id: str) -> bytes:
@@ -178,11 +247,12 @@ async def _speak_elevenlabs(text: str, emotion: str, api_key: str, voice_id: str
     }
     data = {
         "text": text,
-        "model_id": "eleven_monolingual_v1",
+        "model_id": os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"),
         "voice_settings": {
             "stability": settings["stability"],
             "similarity_boost": settings["similarity_boost"],
-            "style": settings["style"]
+            "style": settings["style"],
+            "use_speaker_boost": True
         }
     }
 
@@ -223,10 +293,10 @@ async def speak(text: str, emotion: str = "neutral") -> bytes:
         return cached
 
     api_key = os.getenv("ELEVENLABS_API_KEY")
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
 
     # Try ElevenLabs if API key exists
-    if api_key and api_key.strip():
+    if api_key and api_key.strip() and api_key != "your_key_here" and voice_id and voice_id != "your_voice_id":
         try:
             audio_data = await _speak_elevenlabs(text, emotion, api_key, voice_id)
             # Cache the result

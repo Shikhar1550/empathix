@@ -9,10 +9,13 @@ import platform
 import subprocess
 import webbrowser
 import asyncio
+import time
+from urllib.parse import quote_plus
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 try:
     import pyautogui
@@ -28,10 +31,17 @@ OS = platform.system()
 
 ACTION_MESSAGES = {
     "open_spotify": "Opening Spotify for you",
+    "play_spotify_playlist": "Opening your Spotify playlist",
     "open_chrome": "Opening Google Chrome",
     "open_youtube": "Opening YouTube",
+    "open_notepad": "Opening Notepad",
     "open_whatsapp": "Opening WhatsApp",
     "open_calculator": "Opening the calculator",
+    "open_files": "Opening File Explorer",
+    "open_terminal": "Opening Terminal",
+    "open_settings": "Opening Settings",
+    "open_vscode": "Opening VS Code",
+    "open_discord": "Opening Discord",
     "do_search": "Searching for that",
     "get_time": "Fetching the current time",
     "get_date": "Fetching today's date",
@@ -41,6 +51,8 @@ ACTION_MESSAGES = {
     "media_volume_up": "Turning the volume up",
     "media_volume_down": "Turning the volume down",
     "media_mute": "Muting the audio",
+    "media_next": "Skipping to the next track",
+    "media_previous": "Going back to the previous track",
 }
 
 
@@ -100,6 +112,33 @@ def _check_app_installed(app_name: str) -> bool:
         return False
 
 
+def _windows_start(target: str) -> None:
+    """Start a Windows app, URI, or shell target without blocking FastAPI."""
+    subprocess.Popen(
+        ["cmd", "/c", "start", "", target],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        shell=False
+    )
+
+
+def _press_spotify_autoplay_keys() -> None:
+    """Best-effort desktop Spotify playback nudge after opening a playlist."""
+    if not PYAUTOGUI_AVAILABLE:
+        return
+
+    delay = float(os.getenv("SPOTIFY_OPEN_DELAY_SECONDS", "4.0"))
+    keys = os.getenv("SPOTIFY_AUTOPLAY_KEYS", "enter,space,playpause")
+
+    time.sleep(delay)
+    for key in [item.strip() for item in keys.split(",") if item.strip()]:
+        try:
+            pyautogui.press(key)
+            time.sleep(0.8)
+        except Exception:
+            pass
+
+
 # =============================================================================
 # Action Functions
 # =============================================================================
@@ -108,7 +147,7 @@ def open_spotify() -> dict:
     """Open Spotify app or web player."""
     try:
         if OS == "Windows":
-            subprocess.Popen(["start", "spotify"], shell=True)
+            _windows_start("spotify:")
         elif OS == "Darwin":
             if _check_app_installed("Spotify"):
                 subprocess.Popen(["open", "-a", "Spotify"])
@@ -132,11 +171,71 @@ def open_spotify() -> dict:
         }
 
 
+def play_spotify_playlist(query: Optional[str] = None) -> dict:
+    """
+    Open Spotify and start a playlist-style target.
+
+    For "my playlist", set SPOTIFY_DEFAULT_PLAYLIST_URI in .env, for example:
+    spotify:playlist:37i9dQZF1DXcBWIGoYBM5M
+    """
+    default_playlist = os.getenv("SPOTIFY_DEFAULT_PLAYLIST_URI", "").strip()
+    default_url = os.getenv("SPOTIFY_DEFAULT_PLAYLIST_URL", "").strip()
+    default_name = os.getenv("SPOTIFY_DEFAULT_PLAYLIST_NAME", "").strip()
+    playlist_name = (query or "").strip()
+    default_names = {"", "my", "playlist", "my playlist"}
+
+    if default_name:
+        default_names.add(default_name.lower())
+        default_names.add(default_name.lower().replace(" songs", ""))
+
+    matches_default_name = playlist_name.lower() in default_names
+    if default_name and playlist_name:
+        name_score = SequenceMatcher(None, playlist_name.lower(), default_name.lower()).ratio()
+        matches_default_name = matches_default_name or name_score >= 0.72
+
+    if matches_default_name and default_playlist:
+        target = default_playlist
+        message = f"Playing {default_name or 'your Spotify playlist'}"
+    elif matches_default_name and default_url:
+        target = default_url
+        message = f"Opening {default_name or 'your Spotify playlist'}"
+    elif matches_default_name:
+        target = "spotify:collection:playlists"
+        message = "Opening Spotify playlists. Add SPOTIFY_DEFAULT_PLAYLIST_URI in .env for one-command playback."
+    else:
+        encoded_query = quote_plus(f"{playlist_name} playlist")
+        target = f"spotify:search:{encoded_query}"
+        message = f"Searching Spotify for {playlist_name} playlist"
+
+    try:
+        if OS == "Windows":
+            _windows_start(target)
+        elif OS == "Darwin":
+            subprocess.Popen(["open", target])
+        elif OS == "Linux":
+            subprocess.Popen(["xdg-open", target])
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        # Give Spotify a moment to focus, then nudge playback. This is a
+        # hackathon-friendly bridge; exact playback needs Spotify OAuth.
+        _press_spotify_autoplay_keys()
+
+        return {"success": True, "message": message}
+    except Exception:
+        if default_url:
+            webbrowser.open(default_url)
+            return {"success": True, "message": "Opening your Spotify playlist in the browser", "fallback": True}
+
+        webbrowser.open("https://open.spotify.com/collection/playlists")
+        return {"success": True, "message": "Opening Spotify playlists in the browser", "fallback": True}
+
+
 def open_chrome() -> dict:
     """Open Google Chrome browser."""
     try:
         if OS == "Windows":
-            subprocess.Popen(["start", "chrome"], shell=True)
+            _windows_start("chrome")
         elif OS == "Darwin":
             if _check_app_installed("Google Chrome"):
                 subprocess.Popen(["open", "-a", "Google Chrome"])
@@ -175,7 +274,7 @@ def open_whatsapp() -> dict:
     """Open WhatsApp app or web."""
     try:
         if OS == "Windows":
-            subprocess.Popen(["start", "whatsapp"], shell=True)
+            _windows_start("whatsapp:")
         elif OS == "Darwin":
             if _check_app_installed("WhatsApp"):
                 subprocess.Popen(["open", "-a", "WhatsApp"])
@@ -219,6 +318,127 @@ def open_calculator() -> dict:
         return {
             "success": True,
             "message": "Opening Google Calculator (system calc not found)",
+            "fallback": True
+        }
+
+
+def open_notepad() -> dict:
+    """Open Notepad."""
+    try:
+        if OS == "Windows":
+            subprocess.Popen(["notepad.exe"])
+        elif OS == "Darwin":
+            subprocess.Popen(["open", "-a", "TextEdit"])
+        elif OS == "Linux":
+            subprocess.Popen(["xdg-open", ""])
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        return {"success": True, "message": ACTION_MESSAGES["open_notepad"]}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to open Notepad: {str(e)}"}
+
+
+def open_files() -> dict:
+    """Open the system file manager."""
+    try:
+        if OS == "Windows":
+            subprocess.Popen(["explorer.exe"])
+        elif OS == "Darwin":
+            subprocess.Popen(["open", str(Path.home())])
+        elif OS == "Linux":
+            subprocess.Popen(["xdg-open", str(Path.home())])
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        return {"success": True, "message": ACTION_MESSAGES["open_files"]}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to open files: {str(e)}"}
+
+
+def open_terminal() -> dict:
+    """Open a terminal window."""
+    try:
+        if OS == "Windows":
+            _windows_start("wt")
+        elif OS == "Darwin":
+            subprocess.Popen(["open", "-a", "Terminal"])
+        elif OS == "Linux":
+            for command in ("gnome-terminal", "konsole", "xterm"):
+                if _check_command_exists(command):
+                    subprocess.Popen([command])
+                    break
+            else:
+                raise RuntimeError("No terminal found")
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        return {"success": True, "message": ACTION_MESSAGES["open_terminal"]}
+    except Exception:
+        if OS == "Windows":
+            try:
+                subprocess.Popen(["cmd.exe"])
+                return {"success": True, "message": "Opening Command Prompt"}
+            except Exception as e:
+                return {"success": False, "message": f"Failed to open terminal: {str(e)}"}
+        return {"success": False, "message": "Failed to open terminal"}
+
+
+def open_settings() -> dict:
+    """Open system settings."""
+    try:
+        if OS == "Windows":
+            _windows_start("ms-settings:")
+        elif OS == "Darwin":
+            subprocess.Popen(["open", "-a", "System Settings"])
+        elif OS == "Linux":
+            if _check_command_exists("gnome-control-center"):
+                subprocess.Popen(["gnome-control-center"])
+            else:
+                raise RuntimeError("No settings app found")
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        return {"success": True, "message": ACTION_MESSAGES["open_settings"]}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to open settings: {str(e)}"}
+
+
+def open_vscode() -> dict:
+    """Open Visual Studio Code."""
+    try:
+        if OS == "Windows":
+            _windows_start("code")
+        elif OS == "Darwin":
+            subprocess.Popen(["open", "-a", "Visual Studio Code"])
+        elif OS == "Linux":
+            subprocess.Popen(["code"])
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        return {"success": True, "message": ACTION_MESSAGES["open_vscode"]}
+    except Exception as e:
+        return {"success": False, "message": f"Failed to open VS Code: {str(e)}"}
+
+
+def open_discord() -> dict:
+    """Open Discord app or web."""
+    try:
+        if OS == "Windows":
+            _windows_start("discord:")
+        elif OS == "Darwin":
+            subprocess.Popen(["open", "-a", "Discord"])
+        elif OS == "Linux":
+            subprocess.Popen(["discord"])
+        else:
+            raise RuntimeError("Unsupported OS")
+
+        return {"success": True, "message": ACTION_MESSAGES["open_discord"]}
+    except Exception:
+        webbrowser.open("https://discord.com/app")
+        return {
+            "success": True,
+            "message": "Opening Discord in the browser",
             "fallback": True
         }
 
@@ -304,6 +524,9 @@ def media_control(action: str) -> dict:
         "play": "playpause",
         "pause": "playpause",
         "playpause": "playpause",
+        "next": "nexttrack",
+        "previous": "prevtrack",
+        "prev": "prevtrack",
         "volume_up": "volumeup",
         "volumeup": "volumeup",
         "volume_down": "volumedown",
@@ -326,6 +549,8 @@ def media_control(action: str) -> dict:
 
         message_map = {
             "playpause": ACTION_MESSAGES["media_play"],
+            "nexttrack": ACTION_MESSAGES["media_next"],
+            "prevtrack": ACTION_MESSAGES["media_previous"],
             "volumeup": ACTION_MESSAGES["media_volume_up"],
             "volumedown": ACTION_MESSAGES["media_volume_down"],
             "volumemute": ACTION_MESSAGES["media_mute"],
@@ -379,6 +604,9 @@ async def run_action(intent: dict) -> dict:
         if intent_type == "open_spotify":
             action_result = await asyncio.to_thread(open_spotify)
 
+        elif intent_type == "play_spotify_playlist":
+            action_result = await asyncio.to_thread(play_spotify_playlist, query)
+
         elif intent_type == "open_chrome":
             action_result = await asyncio.to_thread(open_chrome)
 
@@ -390,6 +618,24 @@ async def run_action(intent: dict) -> dict:
 
         elif intent_type == "open_calculator":
             action_result = await asyncio.to_thread(open_calculator)
+
+        elif intent_type == "open_notepad":
+            action_result = await asyncio.to_thread(open_notepad)
+
+        elif intent_type == "open_files":
+            action_result = await asyncio.to_thread(open_files)
+
+        elif intent_type == "open_terminal":
+            action_result = await asyncio.to_thread(open_terminal)
+
+        elif intent_type == "open_settings":
+            action_result = await asyncio.to_thread(open_settings)
+
+        elif intent_type == "open_vscode":
+            action_result = await asyncio.to_thread(open_vscode)
+
+        elif intent_type == "open_discord":
+            action_result = await asyncio.to_thread(open_discord)
 
         elif intent_type == "do_search":
             action_result = await asyncio.to_thread(do_search, query)
@@ -404,7 +650,8 @@ async def run_action(intent: dict) -> dict:
             action_result = await asyncio.to_thread(take_screenshot)
 
         elif intent_type.startswith("media_"):
-            action_result = await asyncio.to_thread(media_control, intent_type)
+            media_action = intent_type.replace("media_", "", 1)
+            action_result = await asyncio.to_thread(media_control, media_action)
 
         else:
             result["message"] = f"Unknown intent: {intent_type}"

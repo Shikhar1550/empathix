@@ -1,113 +1,99 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
-/**
- * WaveformBar — 40 vertical bars that react to mic input via Web Audio API.
- *
- * Props:
- *   isRecording  — boolean
- *   audioStream  — MediaStream from getUserMedia (null when not recording)
- *   emotionColor — string hex color for bars
- */
+function hexToRgb(hex) {
+  const value = hex.replace('#', '');
+  const normalized = value.length === 3
+    ? value.split('').map((char) => `${char}${char}`).join('')
+    : value;
 
-const BAR_COUNT = 40;
+  const numeric = Number.parseInt(normalized, 16);
+  return {
+    r: (numeric >> 16) & 255,
+    g: (numeric >> 8) & 255,
+    b: numeric & 255,
+  };
+}
 
 export default function WaveformBar({
   isRecording = false,
-  audioStream = null,
-  emotionColor = '#7F8C8D',
+  analyserNode = null,
+  emotionColor = '#7a3cff',
 }) {
-  const barsRef = useRef([]);
-  const analyserRef = useRef(null);
-  const audioCtxRef = useRef(null);
-  const rafRef = useRef(null);
-  const sourceRef = useRef(null);
+  const canvasRef = useRef(null);
+  const frameRef = useRef(0);
 
-  // Set up / tear down Web Audio AnalyserNode
   useEffect(() => {
-    if (isRecording && audioStream) {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        audioCtxRef.current = ctx;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
 
-        const source = ctx.createMediaStreamSource(audioStream);
-        sourceRef.current = source;
+    const context = canvas.getContext('2d');
+    if (!context) return undefined;
 
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 128; // gives 64 bins → plenty for 40 bars
-        analyser.smoothingTimeConstant = 0.75;
-        source.connect(analyser);
-        analyserRef.current = analyser;
-      } catch (err) {
-        console.error('[WaveformBar] AudioContext error:', err);
-      }
-    }
-
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      sourceRef.current?.disconnect();
-      sourceRef.current = null;
-      analyserRef.current = null;
-      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-        audioCtxRef.current.close().catch(() => {});
-      }
-      audioCtxRef.current = null;
+    const fit = () => {
+      const width = canvas.clientWidth || 280;
+      const height = 38;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
-  }, [isRecording, audioStream]);
 
-  // Animation loop
-  const draw = useCallback(() => {
-    const analyser = analyserRef.current;
-    if (!analyser) return;
+    const draw = () => {
+      const width = canvas.clientWidth || 280;
+      const height = 38;
+      const { r, g, b } = hexToRgb(emotionColor);
 
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(dataArray);
+      context.clearRect(0, 0, width, height);
 
-    const step = Math.max(1, Math.floor(dataArray.length / BAR_COUNT));
+      if (!analyserNode || !isRecording) {
+        context.strokeStyle = `rgba(${r},${g},${b},0.28)`;
+        context.lineWidth = 1.4;
+        context.beginPath();
 
-    for (let i = 0; i < BAR_COUNT; i++) {
-      const bar = barsRef.current[i];
-      if (!bar) continue;
-      const value = dataArray[Math.min(i * step, dataArray.length - 1)] / 255;
-      const h = Math.max(value * 56, 3);
-      bar.style.height = `${h}px`;
-      bar.style.opacity = `${0.5 + value * 0.5}`;
-    }
-
-    rafRef.current = requestAnimationFrame(draw);
-  }, []);
-
-  useEffect(() => {
-    if (isRecording && analyserRef.current) {
-      draw();
-    } else {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      // Reset bars to idle height
-      barsRef.current.forEach((bar) => {
-        if (bar) {
-          bar.style.height = '';
-          bar.style.opacity = '';
+        for (let x = 0; x < width; x += 1) {
+          const y = height / 2 + Math.sin(x / 16 + performance.now() * 0.01) * 1.8;
+          if (x === 0) context.moveTo(x, y);
+          else context.lineTo(x, y);
         }
-      });
-    }
+
+        context.stroke();
+        frameRef.current = requestAnimationFrame(draw);
+        return;
+      }
+
+      const data = new Uint8Array(analyserNode.frequencyBinCount);
+      analyserNode.getByteTimeDomainData(data);
+
+      context.strokeStyle = `rgba(${r},${g},${b},0.95)`;
+      context.lineWidth = 1.6;
+      context.shadowBlur = 8;
+      context.shadowColor = emotionColor;
+      context.beginPath();
+
+      const step = data.length / width;
+      for (let x = 0; x < width; x += 1) {
+        const value = data[Math.floor(x * step)] / 128;
+        const y = value * (height / 2) + height / 4;
+        if (x === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      }
+
+      context.stroke();
+      context.shadowBlur = 0;
+      frameRef.current = requestAnimationFrame(draw);
+    };
+
+    fit();
+    frameRef.current = requestAnimationFrame(draw);
+    window.addEventListener('resize', fit);
 
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(frameRef.current);
+      window.removeEventListener('resize', fit);
     };
-  }, [isRecording, draw]);
+  }, [analyserNode, emotionColor, isRecording]);
 
-  return (
-    <div className="waveform-container">
-      {Array.from({ length: BAR_COUNT }, (_, i) => (
-        <div
-          key={i}
-          ref={(el) => (barsRef.current[i] = el)}
-          className={`waveform-bar ${!isRecording ? 'waveform-bar-idle' : ''}`}
-          style={{
-            backgroundColor: emotionColor,
-            animationDelay: !isRecording ? `${(i * 0.07) % 1.2}s` : undefined,
-          }}
-        />
-      ))}
-    </div>
-  );
+  return <canvas ref={canvasRef} className="waveform-canvas" aria-hidden="true" />;
 }
